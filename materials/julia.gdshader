@@ -1,32 +1,25 @@
 shader_type canvas_item;
 
-uniform int   color_method = 0;
-uniform int   smoothing = 1;
-uniform vec4  gradient_start : source_color = vec4(0.18, 0., 0.45, 1.);
-uniform vec4  gradient_end : source_color = vec4(1., 1., 0., 1.);
-uniform vec4  gradient_accent : source_color = vec4(1., 1., 0., 1.);
-uniform float accent_position = 0.65;
-uniform float accent_width = 0.34;
+uniform bool smoothing = true;
 uniform float red_frequency=1.6615;
 uniform float green_frequency=1.246;
 uniform float blue_frequency=0.831;
 uniform float red_phase=6.3;
 uniform float green_phase=6.3;
 uniform float blue_phase=6.3;
-
-
 uniform highp float scale = 0.5;
 uniform highp vec2  position = vec2(0.0, 0.0);
-uniform float aspect_ratio = 1.778;
-
 uniform highp vec2 seed = vec2(-0.794084, 0.136444);
+uniform float aspect_ratio = 2.0;
 uniform float power = 2.0;
 uniform float iterations = 50.0;
 uniform float escape = 4.0;
+uniform sampler2D Tex;
+uniform bool paused = false;
 
 
 /****** Math functions ******/
- 
+
 highp vec2 c_pol(highp vec2 c) { 	// Convert from rectangular to polar
 	highp float radius = length(c);
 	highp float theta = atan(c.y, c.x);
@@ -50,82 +43,56 @@ highp vec2 c_pow(highp vec2 base, highp float ex) { // Calculate base ^ exponent
 
 /****** Color functions ******/
 
-vec4 alpha_blend (vec4 top, vec4 bot) {	
+vec4 alpha_blend (vec4 top, vec4 bot) {
 	return vec4( top.r * top.a + bot.r * bot.a * (1. - top.a),
 				 top.g * top.a + bot.g * bot.a * (1. - top.a),
 				 top.b * top.a + bot.b * bot.a * (1. - top.a),
 				 1.0);
-} 
+}
 
 
 vec4 getColor(float i) {
-	if(color_method == 1) {
-		vec4 ramp;
-		vec4 accent;
-
-		// Create gradient
-		ramp = mix(gradient_start, gradient_end, i); 	
-		
-		//gaussian formula ae^( -(x-b)^2 / 2c^2 )
-		// a = curve's peak = 1.0
-		// b = center of peak position
-		// c = standard deviation which controls width of bell
-		
-		float gaussianx = exp( -((i-accent_position)*(i-accent_position)) / (2.*accent_width*accent_width) );
-		accent = vec4(gradient_accent.r*gaussianx,
-					  gradient_accent.g*gaussianx,
-					  gradient_accent.b*gaussianx,
-					  gaussianx);
-		
-		return alpha_blend(accent, ramp);
-	}
-	
-	else {
-		/* Sin/Cos creates a smooth wave between 1 and -1, offset from each other. 
-		*  You can have 4 evenly distributed offsets from sin, cos, -sin, -cos
-		*  (sin(x) +1) / 2 -> changes the wave to go between 0 and 1 with the same frequency, +2../4 will go from 0.5 and 1.0
-		*  Calculate full cycles with: sin(cycles*6.5*i)   or   (sin(cycles*5.4*i)+1.0)/2.0   or   (cos(cycles*3.8*i)+1.0)/2.0
-		*/
-       	return vec4( (sin(red_frequency*6.5*i + red_phase) +1.0)/2.0,
-	       			 (sin(green_frequency*6.5*i + green_phase) +1.0)/2.0,
-       				 (sin(blue_frequency*6.5*i + blue_phase) + 1.0)/2.0,
-					 1.);
-	}
+	/* Sin/Cos creates a smooth wave between 1 and -1, offset from each other.
+	*  You can have 4 evenly distributed offsets from sin, cos, -sin, -cos
+	*  (sin(x) +1) / 2 -> changes the wave to go between 0 and 1 with the same frequency, +2../4 will go from 0.5 and 1.0
+	*  Calculate full cycles with: sin(cycles*6.5*i)   or   (sin(cycles*5.4*i)+1.0)/2.0   or   (cos(cycles*3.8*i)+1.0)/2.0
+	*/
+   	float ival = 2.*log(i+1.);
+   	return vec4( (sin(red_frequency*ival + red_phase) +1.0)/2.0,
+       			 (sin(green_frequency*ival + green_phase) +1.0)/2.0,
+   				 (sin(blue_frequency*ival + blue_phase) + 1.0)/2.0,
+				 1.);
 }
 
 
 /****** Fragement Main ******/
 
-void fragment() {	
-	float i = 0.0;
-	
-	highp vec2 c = seed;
-	
-	highp vec2 z;
-	z.x = aspect_ratio * (UV.x - 0.5) / scale - position.x;
-	z.y = (UV.y - 0.5) / scale + position.y;
-	
-	if(power==2.0)
-		while( i<iterations && length(z) <= escape ) { 
-			z = vec2(z.x*z.x - z.y*z.y, power*z.x*z.y) + c;		//20fps
-			i++;		
-		}		
-	else
-		while( i<iterations && length(z) <= escape ) { 
-			z = c_pow(z, power) + c;							//6-7fps				
-			i++;	
-		}
-
-
+void fragment() {
 	vec4 color;
-
-	if (i >= iterations) 
-		color = vec4(0.0, 0.0, 0.0, 1.0);
-	else { 
-		if(smoothing==1 && power>1.) i -= log(log(length(z))) / log(power);		
-		color = getColor(i/iterations);
+	if (paused) { color = texture(Tex, UV); }
+	else {
+		float i = 0.0;
+		highp vec2 c = seed;
+		highp vec2 z;
+		z.x = aspect_ratio * (UV.x - 0.5) / scale - position.x;
+		z.y = (UV.y - 0.5) / scale + position.y;
+		if (abs(power-2.0) < 0.001)
+			while( i<iterations && length(z) <= escape ) {
+				z = vec2(z.x*z.x - z.y*z.y, power*z.x*z.y) + c;		//20fps
+				i++;
+			}
+		else
+			while( i<iterations && length(z) <= escape ) {
+				z = c_pow(z, power) + c;							//6-7fps
+				i++;
+			}
+		if (i >= iterations)
+			color = vec4(0.0, 0.0, 0.0, 1.0);
+		else {
+			if(smoothing) i -= log(log(length(z))) / log(abs(power));
+			color = getColor(i/4.);
+		}
 	}
-		
 	COLOR = color;
 }
 
